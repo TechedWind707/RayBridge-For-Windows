@@ -24,6 +24,10 @@ export interface TokenSet {
  * passphrase using Raycast's salt, and return it.
  */
 function getDatabasePassphrase(): string {
+  // macOS-specific; on Windows, this function should not be called
+  if (typeof process !== 'undefined' && process.platform === 'win32') {
+    throw new Error('getDatabasePassphrase is macOS-only on this port');
+  }
   const keyHex = execFileSync("security", [
     "find-generic-password",
     "-s",
@@ -129,6 +133,11 @@ function queryDB(passphrase: string, sql: string, retries = 3): any[] {
  * Returns a map of extension name -> array of token sets.
  */
 export function loadRaycastTokens(): Map<string, TokenSet[]> {
+  // Windows port: OAuth tokens retrieval is not implemented yet. Return empty set to allow MVP to run.
+  if (typeof process !== 'undefined' && process.platform === 'win32') {
+    console.warn('raybridge: Windows platform detected; OAuth token loading is not implemented yet. Returning empty tokens.');
+    return new Map<string, TokenSet[]>();
+  }
   const tokens = new Map<string, TokenSet[]>();
 
   try {
@@ -160,6 +169,11 @@ export function loadRaycastTokens(): Map<string, TokenSet[]> {
  * Returns a map of extension name -> preference key-value pairs.
  */
 export function loadRaycastPreferences(): Record<string, Record<string, unknown>> {
+  // Windows: guard against macOS-specific preferences loading until implemented
+  if (typeof process !== 'undefined' && process.platform === 'win32') {
+    console.warn('raybridge: Windows platform detected; preferences loading not implemented yet');
+    return {};
+  }
   const prefs: Record<string, Record<string, unknown>> = {};
 
   try {
@@ -200,4 +214,24 @@ export function loadRaycastPreferences(): Record<string, Record<string, unknown>
 export async function getOAuthTokens(extensionName: string) {
   const tokens = loadRaycastTokens();
   return tokens.get(extensionName) ?? null;
+}
+
+// Windows-specific helper: attempt to open an encrypted Raycast DB using sqlcipher CLI
+export async function openEncryptedDatabaseWindows(dbPath: string, passphrase: string, sql: string): Promise<any[]> {
+  try {
+    const { execSync } = require('node:child_process');
+    const result = execSync(`sqlcipher "${dbPath}"`, {
+      input: `PRAGMA key = '${passphrase}';\n.mode json\n${sql}`,
+      encoding: 'utf-8',
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    const jsonStr = result.startsWith('ok\n') ? result.slice(3) : result;
+    try {
+      return JSON.parse(jsonStr.trim());
+    } catch {
+      return [];
+    }
+  } catch (err) {
+    throw err;
+  }
 }

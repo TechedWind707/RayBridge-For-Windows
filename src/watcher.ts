@@ -1,6 +1,6 @@
 import { watch, type FSWatcher } from "node:fs";
-import { join } from "node:path";
-import { homedir } from "node:os";
+import { dirname } from "node:path";
+import { getPlatformPaths } from "./platform.js";
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 
 export interface WatcherOptions {
@@ -11,13 +11,10 @@ export interface WatcherOptions {
 
 export function startExtensionWatcher(options: WatcherOptions): FSWatcher[] {
   const { onReload, getServers, debounceMs = 1000 } = options;
-  const home = homedir();
-
-  // Paths to watch
-  const extensionsDir = join(home, ".config", "raycast", "extensions");
-  const raycastSupportDir = join(home, "Library", "Application Support", "com.raycast.macos");
-  const raybridgeConfigDir = join(home, ".config", "raybridge");
-  const rayAiToolsConfigDir = join(home, ".config", "ray-ai-tools");
+  // Paths to watch (platform-aware)
+  const { extensionsDir, configDir, databasePath } = getPlatformPaths();
+  const raycastSupportDir = dirname(databasePath);
+  const raybridgeConfigDir = configDir;
 
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
   let isReloading = false;
@@ -106,18 +103,7 @@ export function startExtensionWatcher(options: WatcherOptions): FSWatcher[] {
     // Config dir might not exist
   }
 
-  // Watch ray-ai-tools config directory (legacy)
-  try {
-    const legacyWatcher = watch(rayAiToolsConfigDir, {}, (_event, filename) => {
-      if (filename?.endsWith(".json")) {
-        debouncedReload(`preferences (${filename})`);
-      }
-    });
-    watchers.push(legacyWatcher);
-    console.error(`raybridge: Watching ${rayAiToolsConfigDir}`);
-  } catch (err: any) {
-    // Config dir might not exist
-  }
+  // Note: skipping legacy ray-ai-tools watcher on Windows for compatibility
 
   return watchers;
 }

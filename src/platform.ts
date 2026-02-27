@@ -7,9 +7,9 @@ export const IS_MACOS = process.platform === 'darwin'
 export function getPlatformPaths(): { extensionsDir: string; configDir: string; databasePath: string } {
   if (IS_WINDOWS) {
     return {
-      extensionsDir: path.join(process.env.APPDATA || '', 'Raycast', 'extensions'),
-      configDir: path.join(process.env.APPDATA || '', 'raybridge'),
-      databasePath: path.join(process.env.APPDATA || '', 'Raycast', 'raycast-enc.sqlite'),
+      extensionsDir: path.join(os.homedir(), '.config', 'raycast-x', 'extensions'),
+      configDir: path.join(os.homedir(), '.config', 'raybridge'),
+      databasePath: path.join(os.homedir(), '.config', 'raycast-x', 'raycast-enc.sqlite'),
     }
   } else {
     return {

@@ -8,6 +8,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { discoverExtensions, type ExtensionEntry } from "./discovery.js";
+import { getPlatformPaths } from './platform.js';
 import { executeTool } from "./loader.js";
 import { setPreferences, setRaycastTokens } from "./shims.js";
 import { loadRaycastTokens, loadRaycastPreferences } from "./auth.js";
@@ -29,12 +30,8 @@ export interface ServerContext {
 async function loadPreferences(): Promise<
   Record<string, Record<string, unknown>>
 > {
-  const configPath = join(
-    homedir(),
-    ".config",
-    "raybridge",
-    "preferences.json"
-  );
+  const { configDir } = getPlatformPaths();
+  const configPath = join(configDir, "preferences.json");
   try {
     return JSON.parse(await readFile(configPath, "utf-8"));
   } catch {
