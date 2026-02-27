@@ -195,3 +195,9 @@ export function loadRaycastPreferences(): Record<string, Record<string, unknown>
 
   return prefs;
 }
+
+// Lightweight adapter for Phase 2 test harness: expose OAuth tokens for an extension
+export async function getOAuthTokens(extensionName: string) {
+  const tokens = loadRaycastTokens();
+  return tokens.get(extensionName) ?? null;
+}

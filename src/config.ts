@@ -1,6 +1,6 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join, dirname } from "node:path";
-import { homedir } from "node:os";
+import { getPlatformPaths } from './platform';
 import type { ExtensionEntry } from "./discovery.js";
 
 export interface ExtensionConfig {
@@ -13,7 +13,8 @@ export interface ToolsConfig {
   extensions: Record<string, ExtensionConfig>;
 }
 
-const CONFIG_DIR = join(homedir(), ".config", "raybridge");
+const { configDir } = getPlatformPaths();
+const CONFIG_DIR = configDir;
 const CONFIG_PATH = join(CONFIG_DIR, "tools.json");
 
 export function getConfigPath(): string {
