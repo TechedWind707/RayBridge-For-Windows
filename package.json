@@ -9,12 +9,13 @@
   },
   "scripts": {
     "start": "bun run src/index.ts",
-    "start:http": "MCP_HTTP=true bun run src/index.ts",
+    "start:http": "bun run src/index.ts --http",
     "dev": "bun --watch src/index.ts",
-    "dev:http": "MCP_HTTP=true bun --watch src/index.ts",
+    "dev:http": "bun --watch src/index.ts --http",
     "config": "bun run src/cli.ts",
     "test:shims": "bun run src/test-shims.ts",
-    "start:bg": "nohup bun run start:http > raybridge.log 2>&1 & echo $! > raybridge.pid && tail -f raybridge.log"
+    "start:bg": "nohup bun run start:http > raybridge.log 2>&1 & echo $! > raybridge.pid && tail -f raybridge.log",
+    "list": "bun run src/list-extensions.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
@@ -41,5 +42,11 @@
   "bugs": {
     "url": "https://github.com/jlokos/raybridge/issues"
   },
-  "keywords": ["mcp", "raycast", "claude", "claude-code", "model-context-protocol"]
+  "keywords": [
+    "mcp",
+    "raycast",
+    "claude",
+    "claude-code",
+    "model-context-protocol"
+  ]
 }

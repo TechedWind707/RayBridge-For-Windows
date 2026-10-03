@@ -1,6 +1,9 @@
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { getPlatformPaths, IS_WINDOWS, IS_MACOS } from "./platform.js";
 import type { TokenSet } from "./auth.js";
 
 const require = createRequire(import.meta.url);
@@ -132,14 +135,9 @@ const environmentDescriptor = {
       assetsPath: currentExtensionDir
         ? join(currentExtensionDir, "assets")
         : "",
-      supportPath: join(
-        homedir(),
-        "Library",
-        "Application Support",
-        "com.raycast.macos",
-        "extensions",
-        currentExtension || "mcp-bridge"
-      ),
+      // Per-extension writable folder. Created on demand so extensions that
+      // cache files there don't crash on Windows.
+      supportPath: ensureDir(join(getPlatformPaths().supportDir, currentExtension || "mcp-bridge")),
       textSize: "medium",
       theme: "dark",
       appearance: "dark",
@@ -216,6 +214,16 @@ class PKCEClient {
         },
       };
     }
+    // WORKAROUND (Windows): Raycast's own OAuth store isn't readable here, so
+    // let the user supply a token in ~/.config/raybridge/preferences.json:
+    //   { "github": { "accessToken": "ghp_..." } }
+    // Works for any API that accepts a plain bearer token (GitHub PAT,
+    // Slack user/bot token, Zoom server-to-server token, ...).
+    const manual = preferences[extName] || {};
+    const manualToken = (manual.accessToken ?? manual.personalAccessToken ?? manual.token) as string | undefined;
+    if (manualToken) {
+      return { accessToken: manualToken, refreshToken: undefined, idToken: undefined, isExpired: () => false };
+    }
     return undefined;
   }
   async setTokens(_response: Record<string, unknown>) {
@@ -227,13 +235,31 @@ class PKCEClient {
 }
 
 /** LocalStorage - async stubs */
+// Each extension gets its own JSON file: ~/.config/raybridge/storage/<ext>.json
+// (was a no-op before, so anything an extension "remembered" was lost).
+function storageFile() {
+  const dir = ensureDir(join(getPlatformPaths().configDir, "storage"));
+  return join(dir, `${(currentExtension || "mcp-bridge").replace(/[^a-z0-9._-]/gi, "_")}.json`);
+}
+function readStore(): Record<string, string | number | boolean> {
+  try { return JSON.parse(readFileSync(storageFile(), "utf-8")); } catch { return {}; }
+}
+function writeStore(data: Record<string, unknown>) {
+  writeFileSync(storageFile(), JSON.stringify(data, null, 2));
+}
 const LocalStorage = {
-  getItem: async (_key: string) => undefined,
-  setItem: async (_key: string, _value: string) => {},
-  removeItem: async (_key: string) => {},
-  allItems: async () => ({}),
-  clear: async () => {},
+  getItem: async (key: string) => readStore()[key],
+  setItem: async (key: string, value: string | number | boolean) => { const s = readStore(); s[key] = value; writeStore(s); },
+  removeItem: async (key: string) => { const s = readStore(); delete s[key]; writeStore(s); },
+  allItems: async () => readStore(),
+  clear: async () => writeStore({}),
 };
+
+/** mkdir -p that returns the path, so it can be used inline. */
+function ensureDir(dir: string) {
+  try { mkdirSync(dir, { recursive: true }); } catch { /* ignore */ }
+  return dir;
+}
 
 /** getPreferenceValues - reads from preferences map */
 function getPreferenceValues<T = Record<string, unknown>>(): T {
@@ -244,6 +270,23 @@ function getPreferenceValues<T = Record<string, unknown>>(): T {
 async function getApplications() {
   const { readdirSync, existsSync } = await import("node:fs");
   const apps: Array<{ name: string; path: string; bundleId?: string }> = [];
+  if (IS_WINDOWS) {
+    // Windows has no /Applications; the Start Menu shortcuts are the closest list.
+    const roots = [
+      join(process.env.ProgramData || "C:\\ProgramData", "Microsoft", "Windows", "Start Menu", "Programs"),
+      join(process.env.APPDATA || join(homedir(), "AppData", "Roaming"), "Microsoft", "Windows", "Start Menu", "Programs"),
+    ];
+    const walk = (dir: string, depth = 0) => {
+      if (depth > 2 || !existsSync(dir)) return;
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) walk(full, depth + 1);
+        else if (entry.name.toLowerCase().endsWith(".lnk")) apps.push({ name: entry.name.slice(0, -4), path: full, bundleId: undefined });
+      }
+    };
+    roots.forEach((r) => { try { walk(r); } catch { /* ignore */ } });
+    return apps;
+  }
   const appDirs = ["/Applications", `${homedir()}/Applications`];
   for (const dir of appDirs) {
     if (!existsSync(dir)) continue;
@@ -265,12 +308,26 @@ async function getApplications() {
 }
 
 /** Clipboard - clipboard operations */
+// Uses the OS clipboard tools. Windows: PowerShell Set/Get-Clipboard. macOS: pbcopy/pbpaste.
+function clipWrite(text: string) {
+  try {
+    if (IS_WINDOWS) execFileSync("powershell", ["-NoProfile", "-Command", "$input | Set-Clipboard"], { input: text });
+    else if (IS_MACOS) execFileSync("pbcopy", [], { input: text });
+  } catch (err: any) { console.error(`raybridge: clipboard copy failed: ${err.message}`); }
+}
+function clipRead(): string {
+  try {
+    if (IS_WINDOWS) return execFileSync("powershell", ["-NoProfile", "-Command", "Get-Clipboard -Raw"], { encoding: "utf-8" }).replace(/\r?\n$/, "");
+    if (IS_MACOS) return execFileSync("pbpaste", [], { encoding: "utf-8" });
+  } catch { /* ignore */ }
+  return "";
+}
 const Clipboard = {
-  copy: async (_text: string) => {},
-  paste: async () => {},
-  readText: async () => "",
-  read: async () => ({ text: "" }),
-  clear: async () => {},
+  copy: async (content: string | { text?: string }) => clipWrite(typeof content === "string" ? content : content?.text ?? ""),
+  paste: async (content: string | { text?: string }) => clipWrite(typeof content === "string" ? content : content?.text ?? ""), // no "paste into front app" headless; copy instead
+  readText: async () => clipRead(),
+  read: async () => ({ text: clipRead() }),
+  clear: async () => clipWrite(""),
 };
 
 /** AI - AI operations stub */
